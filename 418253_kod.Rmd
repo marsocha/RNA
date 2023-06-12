@@ -1,0 +1,190 @@
+---
+title: 'Projekt 2'
+author: "Marcin Socha, nr 418253"
+output:
+html_document: default
+pdf_document: default
+---
+```{r setup, include=FALSE, echo= FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+---
+```{r bib, include=FALSE}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(caret)
+library(glmnet)
+library(remotes)
+library(randomForest)
+library(mlbench)
+```
+
+## 1)
+### a)
+
+```{r 1a, echo=FALSE}
+Xtrain <- read.table("D:/STUDIA/21_22/LATO/SAD_LAB/X_train.csv", header = TRUE, sep = ",")
+Xtest <- read.table("D:/STUDIA/21_22/LATO/SAD_LAB/X_test.csv", header = TRUE, sep = ",")
+Ytrain <- read.table("D:/STUDIA/21_22/LATO/SAD_LAB/y_train.csv", header = TRUE, sep = ",")
+print(paste("Xtrain zawiera ", ncol(Xtrain), "zmiennych po ", nrow(Xtrain), "obserwacji"))
+if (!any(is.na(Xtrain))){
+  print(" i są one kompletne.")
+} else {
+  print(", lecz nie są one kompletne.")
+}
+print(paste("Xtest zawiera ", ncol(Xtest), "zmiennych po ", nrow(Xtest), "obserwacji"))
+if (!any(is.na(Xtest))){
+  print(" i są one kompletne.")
+} else {
+  print(", lecz nie są one kompletne.")
+}
+print(paste("Ytrain zawiera ", ncol(Ytrain), "zmienną z ", nrow(Ytrain), "obserwacjami"))
+if (!any(is.na(Ytrain))){
+  print(" i są one kompletne.")
+} else {
+  print(", lecz nie są one kompletne.")
+}
+```
+
+### b)
+
+
+```{r 1b, echo= FALSE}
+igrek <- t(Ytrain)
+print(paste("Sprawdźmy kilka podstawowych statystyk: średnia = ",
+  mean(igrek, na.rm = TRUE), ", odchylenie standardowe = ",
+sd(igrek, na.rm = TRUE), "średnie odchylenie bezwzględne = ",
+mad(igrek, na.rm = TRUE), "mediana = ",
+median(igrek, na.rm = TRUE), "."
+))
+print("Histogram zmiennej objaśnianej: ")
+hist(igrek)
+```
+
+### c)
+
+Wybierzmy 250 zmiennych objasniajacych najbardziej skorelowanych ze zmienną objaśnioną i przedstawmy korelację między nimi na mapie ciepła.
+```{r 1c, include=FALSE}
+kor <- c(1:ncol(Xtrain))
+for (k in 1:ncol(Xtrain)) {
+  kor[k] <- cor(Xtrain[,k], Ytrain)  
+}
+tmp <- sort(kor, decreasing = TRUE)[1:250]
+tmp2 <- (kor >= min(tmp))
+tmp3 <- kor[tmp2]
+length(tmp3) #rowne 250, wiec nie musimy szukac, ktore minimalne sa rowne
+tmp4 <- c(1:ncol(Xtrain))
+tmp5 <- tmp4[tmp2]
+tmp6 <- Xtrain[,tmp5]
+
+library(GGally)
+library(ggplot2)
+
+#install.packages("ggcorrplot")
+library(ggcorrplot)
+```
+```{r cd, echo= FALSE}
+ggcorrplot(cor(tmp6))
+```
+
+
+
+## 2)
+
+###a)
+Model ElasticNet korzysta z kombinacji liniowej regresji grzebietowej oraz LASSO.
+Parametry estymowane to $\beta_1, ..., \beta_n$ analogiczne jak w regresji grzebietowej oraz LASSO.
+Składnik kary ma wówczas postać
+$\frac{\sum^{n}_{i=1}(y_i - x_i \beta)^2}{2n} + \lambda(\frac{1-\alpha}{2} \sum^m_{j=1}\beta_j^2 + \alpha \sum^m_{j=1}|\beta_j|)$
+z hiperparametrami $\lambda$ oraz $\alpha$, gdzie$\alpha \in [0,1]$.
+Stąd widzimy, że dla $\alpha = 0$ mamy regresję grzebietową,
+zaś dla $\alpha = 1$ otrzymujemy LASSO.
+Źródła: https://gdudek.el.pcz.pl/files/SUS/SUS_wyklad6.pdf,
+https://www.datacamp.com/tutorial/tutorial-ridge-lasso-elastic-net
+
+
+###b)
+Ustaliłem liczbę podzbiorów do walidacji na 5, ponieważ jest to optymalna liczba dla zbiorów danych takiej wielkości.
+```{r 2b, echo=FALSE, warning = FALSE}
+
+library(glmnet)
+library(mvtnorm)
+library(caret)
+
+trainCon <- trainControl(method = "cv",
+                       number = 5,
+                       verboseIter = TRUE)
+train <- Xtrain
+train['y'] <- as.vector(Ytrain)
+
+tmp <- train(y~.,
+            train,
+            method='glmnet',
+            tuneGrid =expand.grid(alpha = seq(0, 1, by = 0.2), lambda = seq(.1, 1, by = 0.2)),
+            trControl=trainCon)
+
+tmp
+
+```
+Stąd możemy policzyć
+
+```{r srednie tmp, echo=FALSE}
+errors <- as.data.frame(tmp[4])
+print(paste("Średni błąd RMSE ", mean(errors[,3], na.rm=TRUE), " oraz"))
+print(paste("Średni błąd R^2 ", mean(errors[,4], na.rm=TRUE)))
+```
+
+
+## 3)
+
+###a)
+```{r randomForest, echo=FALSE}
+control <- trainControl(method="cv", number=5, search="grid")
+tunegr <- expand.grid(.mtry=c(1:4), .splitrule=c("variance","extratrees"), .min.node.size=c(1,2))
+tmp2 <- train(y~., data=train, method="ranger", metric="RMSE", tuneGrid=tunegr, trControl=control)
+tmp2
+```
+###b)
+
+```{r echo=FALSE, results = 'asis'}
+errors2 <- as.data.frame(tmp2[4])
+errors2
+print(paste("Średni błąd RMSE ", mean(errors2[,4], na.rm=TRUE)))
+print(paste("średni błąd R^2 ", mean(errors2[,5], na.rm=TRUE)))
+library(knitr)
+model_ref <- colMeans(as.matrix(Xtrain))
+R_kw = function(y_ac, y_pr) {
+  cor(y_ac, y_pr)^2
+}
+ref_R <- R_kw(Ytrain, rowMeans(as.matrix(Xtrain)))
+ref_RM <- RMSE(as.matrix(Ytrain), rowMeans(as.matrix(Xtrain)))
+wyniki <- data.frame( optymalne_hiperparametry = c("alpha = 0.2, lambda = 0.1 ", "mtry = 4, splitrule = variance, min.node.size = 1", "model referencyjny"), R2 = c( mean(errors[,4], na.rm=TRUE), mean(errors2[,5], na.rm=TRUE), ref_R), RMSE = c(mean(errors[,3], na.rm=TRUE),mean(errors2[,4], na.rm=TRUE), ref_RM)
+)
+kable(wyniki, caption = "tabelka")
+```
+
+Stąd wydaje się, że najepszym modelem byłby random forest, ponieważ ma najwyższy wskaźnik $R^2$, a RMSE ma porównywalne do ElasticNet (różnią się dopiero 3. miejscu po przecinku).
+Ponieważ ElasticNet oraz RandomForest posiadały wysokie $R^2$ jednak, random forest łatwo można przetrenować, zaś w  modelu extreme gradient boosting możemy to ryzyko zminimalizować zmniejszając hiperparametr eta.
+Wybrałem nround = 1000, ponieważ im większe nround tym dokładniejsze mamy wyniki, max_depth na 8 na podstawie kilku przebliżeń oraz eta= 0.1 tak by zapobiec przetrenowaniu modelu.
+### 4)
+
+```{r pred, echo=FALSE}
+library(xgboost)
+library(readr)
+library(stringr)
+library(caret)
+library(car)
+set.seed(123)
+xgb <- xgboost(data = as.matrix(Xtrain), 
+               label = as.matrix(Ytrain), 
+               eta = 0.1,
+               max_depth = 8, 
+               nround=1000, 
+)
+Expected <- predict(xgb, data.matrix(Xtest))
+ID <- 0:669
+csv <- cbind(ID, Expected)
+write.csv(csv, file = "predictMS.csv", row.names = F)
+```
+
